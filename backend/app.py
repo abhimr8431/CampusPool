@@ -18,7 +18,7 @@ from routes.verify   import verify_bp
 app = Flask(__name__)
 app.config['SECRET_KEY']    = os.getenv('SECRET_KEY', 'dev_secret')
 app.config['UPLOAD_FOLDER'] = 'uploads/'
-CORS(app)
+CORS(app, origins=["http://localhost:*", "http://127.0.0.1:*"])
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 app.register_blueprint(auth_bp,     url_prefix='/api/auth')
