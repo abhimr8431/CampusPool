@@ -2,7 +2,8 @@ from flask import Blueprint, request, jsonify
 from bson import ObjectId
 from models.db import users, rides, requests as req_col
 from middleware.auth import token_required
-
+from routes.profile import profile_bp
+app.register_blueprint(profile_bp, url_prefix='/api/profile')
 profile_bp = Blueprint('profile', __name__)
 
 
@@ -86,3 +87,17 @@ def get_user(current_user, user_id):
         return jsonify({'error': 'User not found'}), 404
     user['_id'] = str(user['_id'])
     return jsonify(user)
+
+@profile_bp.route('/update-vehicle', methods=['PATCH'])
+@token_required
+def update_vehicle(current_user):
+    data = request.get_json()
+    users.update_one(
+        {'_id': current_user['_id']},
+        {'$set': {
+            'vehicle.name':         data.get('name', ''),
+            'vehicle.mileage_kmpl': float(data.get('mileage_kmpl', 40)),
+            'vehicle.fuel_type':    data.get('fuel_type', 'petrol'),
+        }}
+    )
+    return jsonify({'message': 'Vehicle updated'})

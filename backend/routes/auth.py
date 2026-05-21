@@ -13,8 +13,10 @@ from bson import ObjectId
 
 auth_bp = Blueprint('auth', __name__)
 bcrypt  = Bcrypt()
-
-ALLOWED_DOMAINS = os.getenv('ALLOWED_DOMAINS', 'rvce.edu.in').split(',')
+ALLOWED_DOMAINS = os.getenv(
+    'ALLOWED_DOMAINS',
+    'rvce.edu.in,msrit.edu'
+).split(',')
 
 
 def send_otp_email(to_email: str, otp: int):

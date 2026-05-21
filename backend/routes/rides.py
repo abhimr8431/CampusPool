@@ -32,7 +32,7 @@ def post_ride(current_user):
             return jsonify({'error': f'{f} is required'}), 400
 
     vehicle = current_user.get('vehicle', {})
-    if not vehicle.get('mileage_kmpl'):
+    if not vehicle.get('mileage_kmpl') or float(vehicle.get('mileage_kmpl', 0)) <= 0:
         return jsonify({'error': 'Please set your vehicle mileage in profile first'}), 400
 
     new_ride = ride_schema(
