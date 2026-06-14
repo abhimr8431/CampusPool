@@ -105,10 +105,10 @@ class _MyRequestsScreenState extends State<MyRequestsScreen> {
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 10, vertical: 4),
                               decoration: BoxDecoration(
-                                color: _statusColor(status).withOpacity(0.1),
+                                color: _statusColor(status).withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(8),
                                 border: Border.all(
-                                    color: _statusColor(status).withOpacity(0.3))),
+                                    color: _statusColor(status).withValues(alpha: 0.3))),
                               child: Row(mainAxisSize: MainAxisSize.min, children: [
                                 Icon(_statusIcon(status),
                                     size: 13, color: _statusColor(status)),

@@ -15,7 +15,8 @@ def token_required(f):
         if not token:
             return jsonify({'error': 'Token missing'}), 401
         try:
-            data    = jwt.decode(token, os.getenv('SECRET_KEY'), algorithms=['HS256'])
+            jwt_secret = os.getenv('SECRET_KEY', 'dev_secret')
+            data = jwt.decode(token, jwt_secret, algorithms=['HS256'])
             current_user = users.find_one({'_id': ObjectId(data['user_id'])})
             if not current_user:
                 return jsonify({'error': 'User not found'}), 401

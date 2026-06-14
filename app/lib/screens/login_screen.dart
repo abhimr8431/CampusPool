@@ -15,12 +15,18 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _login() async {
     setState(() { _loading = true; _error = null; });
-    final res = await ApiService.login(_emailCtrl.text.trim(), _passCtrl.text);
-    setState(() => _loading = false);
-    if (res['token'] != null) {
-      Navigator.pushReplacementNamed(context, '/home');
-    } else {
+    try {
+      final res = await ApiService.login(_emailCtrl.text.trim(), _passCtrl.text);
+      if (res['token'] != null) {
+        if (!mounted) return;
+        Navigator.pushReplacementNamed(context, '/home');
+        return;
+      }
       setState(() => _error = res['error'] ?? 'Login failed');
+    } catch (e) {
+      setState(() => _error = 'Login failed. ${e.toString()}');
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 

@@ -145,14 +145,17 @@ def login():
     if not user or not bcrypt.check_password_hash(user['password'], data.get('password', '')):
         return jsonify({'error': 'Invalid email or password'}), 401
 
+    jwt_secret = os.getenv('SECRET_KEY', 'dev_secret')
     token = jwt.encode(
         {
             'user_id': str(user['_id']),
             'exp':     datetime.utcnow() + timedelta(days=7)
         },
-        os.getenv('SECRET_KEY'),
+        jwt_secret,
         algorithm='HS256'
     )
+    if isinstance(token, bytes):
+        token = token.decode('utf-8')
     return jsonify({
         'token':   token,
         'user': {

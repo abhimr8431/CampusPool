@@ -1,6 +1,4 @@
 import 'package:socket_io_client/socket_io_client.dart' as IO;
-import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
 
 const String SOCKET_URL = 'http://10.0.2.2:5000';
 

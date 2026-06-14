@@ -4,8 +4,6 @@ Compares face in ID card photo with selfie using DeepFace (FaceNet model).
 Runs 100% locally — no external API calls, no data leaves your server.
 """
 
-from deepface import DeepFace
-
 
 def match_faces(id_card_path: str, selfie_path: str) -> dict:
     """
@@ -13,6 +11,18 @@ def match_faces(id_card_path: str, selfie_path: str) -> dict:
     Uses FaceNet model — accurate and runs locally.
     Returns match result with confidence score.
     """
+    try:
+        from deepface import DeepFace
+    except ImportError as e:
+        return {
+            'matched':    False,
+            'confidence': 0,
+            'message':    (
+                'Face matching dependency missing. Install tensorflow and tf_keras, or '
+                'remove the face-match feature if not needed.'
+            )
+        }
+
     try:
         result = DeepFace.verify(
             img1_path         = id_card_path,

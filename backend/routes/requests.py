@@ -1,15 +1,19 @@
 from flask import Blueprint, request, jsonify, current_app
+import logging
 from bson import ObjectId
 from datetime import datetime
 from models.db import rides, users, requests as req_col
-from models.request import request_schema
+from models.request import request_schema, accept_request, RequestAcceptError
 from middleware.auth import token_required
 from algorithms.matching import calculate_fare, haversine
 
 requests_bp = Blueprint('requests', __name__)
 
-COLLEGE_LAT = 12.9237
-COLLEGE_LON = 77.4988
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+COLLEGE_LAT = 13.0128
+COLLEGE_LON = 77.5748
 
 
 def serialize_req(r):
@@ -24,6 +28,7 @@ def serialize_req(r):
 @token_required
 def send_request(current_user):
     data    = request.get_json()
+    logger.debug('send_request called by user %s with payload %s', str(current_user.get('_id')), data)
     ride_id = data.get('ride_id')
     if not ride_id:
         return jsonify({'error': 'ride_id required'}), 400
@@ -59,6 +64,7 @@ def send_request(current_user):
     new_req['passenger_lon']  = p_lon
     new_req['fare']           = fare
     result = req_col.insert_one(new_req)
+    logger.info('Created request %s for ride %s by passenger %s', str(result.inserted_id), ride_id, str(current_user.get('_id')))
 
     # Notify rider via Socket.io
     try:
@@ -73,7 +79,7 @@ def send_request(current_user):
             'expires_in_mins': 15
         })
     except Exception as e:
-        print(f'Socket notify failed: {e}')
+        logger.exception('Socket notify failed while sending new_request event')
 
     return jsonify({
         'message':    'Request sent. Waiting for rider to confirm.',
@@ -88,6 +94,7 @@ def send_request(current_user):
 @token_required
 def accept_request(current_user, req_id):
     req  = req_col.find_one({'_id': ObjectId(req_id)})
+    logger.debug('accept_request called: req_id=%s by user=%s', req_id, str(current_user.get('_id')))
     if not req:
         return jsonify({'error': 'Request not found'}), 404
 
@@ -101,10 +108,17 @@ def accept_request(current_user, req_id):
         return jsonify({'error': 'Request has expired'}), 400
 
     # Accept and reduce seat count
+    # Perform update atomically and read back ride to verify seats
     req_col.update_one({'_id': ObjectId(req_id)}, {'$set': {'status': 'accepted'}})
-    rides.update_one({'_id': req['ride_id']},
-                     {'$inc': {'seats_left': -1},
-                      '$push': {'passengers': req['passenger_id']}})
+    update_result = rides.update_one({'_id': req['ride_id'], 'seats_left': {'$gt': 0}},
+                                     {'$inc': {'seats_left': -1},
+                                      '$push': {'passengers': req['passenger_id']}})
+    if update_result.modified_count == 0:
+        # Seat update failed (possibly race or no seats left) — revert request
+        req_col.update_one({'_id': ObjectId(req_id)}, {'$set': {'status': 'declined'}})
+        logger.warning('Failed to decrement seats for ride %s; request %s reverted', str(req['ride_id']), req_id)
+        return jsonify({'error': 'Failed to accept request — ride may be full'}), 400
+    logger.info('Request %s accepted; decremented seats for ride %s', req_id, str(req['ride_id']))
 
     # Mark ride full if no seats left
     updated_ride = rides.find_one({'_id': req['ride_id']})
@@ -123,7 +137,7 @@ def accept_request(current_user, req_id):
             'message':        f'{current_user["name"]} accepted your ride request!'
         })
     except Exception as e:
-        print(f'Socket notify failed: {e}')
+        logger.exception('Socket notify failed while sending request_accepted event')
 
     return jsonify({'message': 'Request accepted', 'fare': req.get('fare', {})})
 
@@ -198,27 +212,115 @@ def incoming_requests(current_user):
 @requests_bp.route('/my-requests', methods=['GET'])
 @token_required
 def my_requests(current_user):
-    my = list(req_col.find({'passenger_id': current_user['_id']}))
+    requests_list = list(req_col.find({
+        'passenger_id': current_user['_id'],
+        'status': {'$in': ['pending', 'accepted']}
+    }))
+
     result = []
-    for r in my:
-        ride  = rides.find_one({'_id': r['ride_id']})
-        rider = users.find_one({'_id': ride['rider_id']},
-                               {'password': 0, 'otp': 0}) if ride else None
+    for r in requests_list:
+        ride = rides.find_one({'_id': r['ride_id']})
+        rider = users.find_one({'_id': ride['rider_id']}, {'password': 0, 'otp': 0})
         result.append({
             'request_id': str(r['_id']),
-            'status':     r['status'],
-            'fare':       r.get('fare', {}),
-            'created_at': r['created_at'].isoformat(),
+            'status':      r['status'],
+            'fare':        r.get('fare', {}),
+            'pickup': {
+                'lat': r.get('passenger_lat'),
+                'lon': r.get('passenger_lon')
+            },
             'ride': {
-                'id':             str(ride['_id']) if ride else '',
-                'departure_time': ride.get('departure_time', '') if ride else '',
-                'origin':         ride.get('origin', {}) if ride else {}
+                'id':             str(ride['_id']),
+                'departure_time': ride['departure_time'],
+                'origin':         ride['origin'],
+                'vehicle_name':   ride.get('vehicle_name'),
+                'seats_left':     ride.get('seats_left')
             },
             'rider': {
-                'name':    rider['name'] if rider else '',
-                'phone':   rider.get('phone', '') if rider else '',
-                'vehicle': rider.get('vehicle', {}).get('name', '') if rider else '',
-                'rating':  rider.get('rating', 5.0) if rider else 0
+                'id':       str(rider['_id']),
+                'name':     rider['name'],
+                'year':     rider.get('year', ''),
+                'branch':   rider.get('branch', ''),
+                'rating':   rider.get('rating', 5.0),
+                'verified': rider['verification']['is_verified']
             }
         })
-    return jsonify({'requests': result})
+
+    return jsonify({'requests': result, 'count': len(result)})
+
+
+# ── GET ACTIVE ACCEPTED REQUESTS (passenger + rider) ───
+@requests_bp.route('/active', methods=['GET'])
+@token_required
+def active_requests(current_user):
+    active = []
+
+    passenger_accepted = list(req_col.find({
+        'passenger_id': current_user['_id'],
+        'status': 'accepted'
+    }))
+    for r in passenger_accepted:
+        ride = rides.find_one({'_id': r['ride_id']})
+        rider = users.find_one({'_id': ride['rider_id']}, {'password': 0, 'otp': 0})
+        active.append({
+            'request_id': str(r['_id']),
+            'status': r['status'],
+            'role': 'passenger',
+            'fare': r.get('fare', {}),
+            'pickup': {
+                'lat': r.get('passenger_lat'),
+                'lon': r.get('passenger_lon')
+            },
+            'ride': {
+                'id':             str(ride['_id']),
+                'departure_time': ride['departure_time'],
+                'origin':         ride['origin'],
+                'vehicle_name':   ride.get('vehicle_name'),
+                'seats_left':     ride.get('seats_left')
+            },
+            'rider': {
+                'id':       str(rider['_id']),
+                'name':     rider['name'],
+                'year':     rider.get('year', ''),
+                'branch':   rider.get('branch', ''),
+                'rating':   rider.get('rating', 5.0),
+                'verified': rider['verification']['is_verified']
+            }
+        })
+
+    my_rides = list(rides.find({'rider_id': current_user['_id']}))
+    ride_ids = [r['_id'] for r in my_rides]
+    rider_accepted = list(req_col.find({
+        'ride_id': {'$in': ride_ids},
+        'status': 'accepted'
+    }))
+    for r in rider_accepted:
+        passenger = users.find_one({'_id': r['passenger_id']}, {'password': 0, 'otp': 0})
+        ride = rides.find_one({'_id': r['ride_id']})
+        active.append({
+            'request_id': str(r['_id']),
+            'status': r['status'],
+            'role': 'rider',
+            'fare': r.get('fare', {}),
+            'pickup': {
+                'lat': r.get('passenger_lat'),
+                'lon': r.get('passenger_lon')
+            },
+            'ride': {
+                'id':             str(ride['_id']),
+                'departure_time': ride['departure_time'],
+                'origin':         ride['origin'],
+                'vehicle_name':   ride.get('vehicle_name'),
+                'seats_left':     ride.get('seats_left')
+            },
+            'passenger': {
+                'id':       str(passenger['_id']),
+                'name':     passenger['name'],
+                'year':     passenger.get('year', ''),
+                'branch':   passenger.get('branch', ''),
+                'rating':   passenger.get('rating', 5.0),
+                'verified': passenger['verification']['is_verified']
+            }
+        })
+
+    return jsonify({'active_requests': active, 'count': len(active)})

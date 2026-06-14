@@ -21,8 +21,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const Scaffold(
+    if (_loading) {
+      return const Scaffold(
       body: Center(child: CircularProgressIndicator(color: Color(0xFF1D9E75))));
+    }
 
     final p = _profile!;
     final v = p['verification'] ?? {};

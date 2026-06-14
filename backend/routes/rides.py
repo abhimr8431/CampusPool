@@ -8,9 +8,9 @@ from algorithms.matching import find_nearby_rides, calculate_fare, haversine
 
 rides_bp = Blueprint('rides', __name__)
 
-COLLEGE_LAT = 12.9237
-COLLEGE_LON = 77.4988
-COLLEGE_NAME = 'RVCE'
+COLLEGE_LAT = 13.0128
+COLLEGE_LON = 77.5748
+COLLEGE_NAME = 'Ramaiah Institute of Technology'
 
 
 def serialize_ride(ride):

@@ -1,11 +1,19 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
-// 10.0.2.2 = localhost on Android emulator
-// Change to your PC's local IP (e.g. 192.168.1.5) for real device
-const String BASE_URL = 'http://127.0.0.1:5000/api';
+// 10.0.2.2 = localhost on Android emulator.
+// If you run on a real Android phone, replace this with your PC's local IP,
+// e.g. 'http://192.168.1.5:5000/api'.
+const String _androidEmulatorUrl = 'http://10.0.2.2:5000/api';
+const String _localhostUrl = 'http://127.0.0.1:5000/api';
+
+String get baseUrl {
+  if (Platform.isAndroid) return _androidEmulatorUrl;
+  return _localhostUrl;
+}
 
 class ApiService {
 
@@ -23,10 +31,27 @@ class ApiService {
     };
   }
 
+  static const Duration _requestTimeout = Duration(seconds: 10);
+
+  static Future<Map<String, dynamic>> _processResponse(Future<http.Response> future) async {
+    try {
+      final res = await future.timeout(_requestTimeout);
+      return jsonDecode(res.body);
+    } on SocketException {
+      return {'error': 'Unable to reach the server. Check your backend or network connection.'};
+    } on TimeoutException {
+      return {'error': 'Request timed out. Please try again.'};
+    } on FormatException {
+      return {'error': 'Received invalid data from the server.'};
+    } catch (e) {
+      return {'error': 'Request failed: ${e.toString()}'};
+    }
+  }
+
   // ── AUTH ─────────────────────────────────────
   static Future<Map<String, dynamic>> register(Map<String, dynamic> data) async {
     final res = await http.post(
-      Uri.parse('$BASE_URL/auth/register'),
+      Uri.parse('$baseUrl/auth/register'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(data),
     );
@@ -34,23 +59,22 @@ class ApiService {
   }
 
   static Future<Map<String, dynamic>> login(String email, String password) async {
-    final res = await http.post(
-      Uri.parse('$BASE_URL/auth/login'),
+    final data = await _processResponse(http.post(
+      Uri.parse('$baseUrl/auth/login'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'email': email, 'password': password}),
-    );
-    final data = jsonDecode(res.body);
+    ));
     if (data['token'] != null) {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('token', data['token']);
-      await prefs.setString('user',  jsonEncode(data['user']));
+      await prefs.setString('user', jsonEncode(data['user']));
     }
     return data;
   }
 
   static Future<Map<String, dynamic>> sendOtp(String email) async {
     final res = await http.post(
-      Uri.parse('$BASE_URL/auth/send-otp'),
+      Uri.parse('$baseUrl/auth/send-otp'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'email': email}),
     );
@@ -59,7 +83,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>> verifyOtp(String email, String otp) async {
     final res = await http.post(
-      Uri.parse('$BASE_URL/auth/verify-otp'),
+      Uri.parse('$baseUrl/auth/verify-otp'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'email': email, 'otp': otp}),
     );
@@ -75,7 +99,7 @@ class ApiService {
   // ── RIDES ────────────────────────────────────
   static Future<Map<String, dynamic>> findRides(double lat, double lon) async {
     final res = await http.get(
-      Uri.parse('$BASE_URL/rides/find?lat=$lat&lon=$lon'),
+      Uri.parse('$baseUrl/rides/find?lat=$lat&lon=$lon'),
       headers: await _headers(),
     );
     return jsonDecode(res.body);
@@ -83,7 +107,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>> postRide(Map<String, dynamic> data) async {
     final res = await http.post(
-      Uri.parse('$BASE_URL/rides/post'),
+      Uri.parse('$baseUrl/rides/post'),
       headers: await _headers(),
       body: jsonEncode(data),
     );
@@ -92,7 +116,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>> getMyRides() async {
     final res = await http.get(
-      Uri.parse('$BASE_URL/rides/my-rides'),
+      Uri.parse('$baseUrl/rides/my-rides'),
       headers: await _headers(),
     );
     return jsonDecode(res.body);
@@ -100,7 +124,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>> cancelRide(String rideId) async {
     final res = await http.patch(
-      Uri.parse('$BASE_URL/rides/$rideId/cancel'),
+      Uri.parse('$baseUrl/rides/$rideId/cancel'),
       headers: await _headers(),
     );
     return jsonDecode(res.body);
@@ -110,7 +134,7 @@ class ApiService {
   static Future<Map<String, dynamic>> sendRequest(
       String rideId, double pLat, double pLon) async {
     final res = await http.post(
-      Uri.parse('$BASE_URL/requests/send'),
+      Uri.parse('$baseUrl/requests/send'),
       headers: await _headers(),
       body: jsonEncode({
         'ride_id':       rideId,
@@ -123,7 +147,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>> acceptRequest(String reqId) async {
     final res = await http.patch(
-      Uri.parse('$BASE_URL/requests/$reqId/accept'),
+      Uri.parse('$baseUrl/requests/$reqId/accept'),
       headers: await _headers(),
     );
     return jsonDecode(res.body);
@@ -131,7 +155,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>> declineRequest(String reqId) async {
     final res = await http.patch(
-      Uri.parse('$BASE_URL/requests/$reqId/decline'),
+      Uri.parse('$baseUrl/requests/$reqId/decline'),
       headers: await _headers(),
     );
     return jsonDecode(res.body);
@@ -139,7 +163,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>> getIncomingRequests() async {
     final res = await http.get(
-      Uri.parse('$BASE_URL/requests/incoming'),
+      Uri.parse('$baseUrl/requests/incoming'),
       headers: await _headers(),
     );
     return jsonDecode(res.body);
@@ -147,7 +171,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>> getMyRequests() async {
     final res = await http.get(
-      Uri.parse('$BASE_URL/requests/my-requests'),
+      Uri.parse('$baseUrl/requests/my-requests'),
       headers: await _headers(),
     );
     return jsonDecode(res.body);
@@ -157,7 +181,7 @@ class ApiService {
   static Future<Map<String, dynamic>> uploadIdCard(File imageFile) async {
     final token   = await getToken();
     final request = http.MultipartRequest(
-      'POST', Uri.parse('$BASE_URL/verify/upload-id'),
+      'POST', Uri.parse('$baseUrl/verify/upload-id'),
     );
     request.headers['Authorization'] = 'Bearer $token';
     request.files.add(await http.MultipartFile.fromPath('idCard', imageFile.path));
@@ -169,7 +193,7 @@ class ApiService {
   static Future<Map<String, dynamic>> uploadSelfie(File selfieFile) async {
     final token   = await getToken();
     final request = http.MultipartRequest(
-      'POST', Uri.parse('$BASE_URL/verify/face-match'),
+      'POST', Uri.parse('$baseUrl/verify/face-match'),
     );
     request.headers['Authorization'] = 'Bearer $token';
     request.files.add(await http.MultipartFile.fromPath('selfie', selfieFile.path));
@@ -180,7 +204,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>> getVerifyStatus() async {
     final res = await http.get(
-      Uri.parse('$BASE_URL/verify/status'),
+      Uri.parse('$baseUrl/verify/status'),
       headers: await _headers(),
     );
     return jsonDecode(res.body);
@@ -189,7 +213,7 @@ class ApiService {
   // ── PROFILE ──────────────────────────────────
   static Future<Map<String, dynamic>> getProfile() async {
     final res = await http.get(
-      Uri.parse('$BASE_URL/profile/me'),
+      Uri.parse('$baseUrl/profile/me'),
       headers: await _headers(),
     );
     return jsonDecode(res.body);
@@ -197,7 +221,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>> updateProfile(Map<String, dynamic> data) async {
     final res = await http.patch(
-      Uri.parse('$BASE_URL/profile/update'),
+      Uri.parse('$baseUrl/profile/update'),
       headers: await _headers(),
       body: jsonEncode(data),
     );
@@ -206,7 +230,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>> rateUser(String userId, double rating) async {
     final res = await http.post(
-      Uri.parse('$BASE_URL/profile/rate'),
+      Uri.parse('$baseUrl/profile/rate'),
       headers: await _headers(),
       body: jsonEncode({'user_id': userId, 'rating': rating}),
     );

@@ -2,8 +2,7 @@ from flask import Blueprint, request, jsonify
 from bson import ObjectId
 from models.db import users, rides, requests as req_col
 from middleware.auth import token_required
-from routes.profile import profile_bp
-app.register_blueprint(profile_bp, url_prefix='/api/profile')
+
 profile_bp = Blueprint('profile', __name__)
 
 
